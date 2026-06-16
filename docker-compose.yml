@@ -1,0 +1,16 @@
+services:
+  oauth-shim:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - shim-data:/data
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  shim-data:

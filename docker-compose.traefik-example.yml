@@ -1,0 +1,63 @@
+# Example: oauth-shim guarding Jenkins and Gerrit behind Traefik.
+# Assumes Traefik is already running with a docker provider and an
+# "le" certificate resolver on an external network named "proxy".
+services:
+  oauth-shim:
+    build: .
+    env_file: .env            # BASE_URL=https://auth.example.com, COOKIE_DOMAIN=example.com
+    volumes:
+      - shim-data:/data
+    networks: [proxy]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.auth.rule=Host(`auth.example.com`)
+      - traefik.http.routers.auth.entrypoints=websecure
+      - traefik.http.routers.auth.tls.certresolver=le
+      - traefik.http.services.auth.loadbalancer.server.port=8080
+      # The ForwardAuth middleware other services attach to:
+      - traefik.http.middlewares.shim-auth.forwardauth.address=http://oauth-shim:8080/auth/verify
+      - traefik.http.middlewares.shim-auth.forwardauth.authResponseHeaders=X-Auth-User,X-Auth-Name,X-Auth-Provider
+
+  jenkins:
+    image: jenkins/jenkins:lts
+    networks: [proxy]
+    volumes:
+      - jenkins-data:/var/jenkins_home
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.jenkins.rule=Host(`jenkins.example.com`)
+      - traefik.http.routers.jenkins.entrypoints=websecure
+      - traefik.http.routers.jenkins.tls.certresolver=le
+      - traefik.http.routers.jenkins.middlewares=shim-auth
+      - traefik.http.services.jenkins.loadbalancer.server.port=8080
+    # In Jenkins: install "Reverse Proxy Auth" plugin, set header name X-Auth-User.
+
+  gerrit:
+    image: gerritcodereview/gerrit
+    networks: [proxy]
+    volumes:
+      - gerrit-data:/var/gerrit
+    environment:
+      # Gerrit trusts the proxy-provided identity header:
+      - CANONICAL_WEB_URL=https://gerrit.example.com
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.gerrit.rule=Host(`gerrit.example.com`)
+      - traefik.http.routers.gerrit.entrypoints=websecure
+      - traefik.http.routers.gerrit.tls.certresolver=le
+      - traefik.http.routers.gerrit.middlewares=shim-auth
+      - traefik.http.services.gerrit.loadbalancer.server.port=8080
+    # In gerrit.config: [auth] type = HTTP, httpHeader = X-Auth-User
+
+networks:
+  proxy:
+    external: true
+
+volumes:
+  shim-data:
+  jenkins-data:
+  gerrit-data:
