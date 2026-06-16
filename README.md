@@ -15,6 +15,7 @@ Intended use: sit in front of (or beside) an internal tool that needs "log in as
 | `GET /auth/{provider}/login` | Starts the OAuth flow (`google`, `microsoft`, `github`) |
 | `GET /auth/{provider}/callback` | OAuth redirect URI |
 | `GET /admin` | Admin-only page (303 to `/` if unauthenticated, 403 if not admin) |
+| `GET /whoami` | JSON identity of the current session, for same-origin SPA/WASM clients (always 200; `authenticated:false` when logged out) |
 | `POST /logout` | Destroys the session |
 | `GET /healthz` | Liveness check |
 
@@ -124,4 +125,10 @@ Traefik (no published ports), otherwise the header could be spoofed.
 
 ## Extending the shim
 
-To protect another app, either (a) put this service behind the same domain and have your app trust the `shim_session` cookie by querying the `sessions`/`users` tables, or (b) add a `/whoami` JSON endpoint and use your reverse proxy's auth-request feature (nginx `auth_request`, Traefik ForwardAuth) — the handler structure in `src/main.rs` (`current_user`) makes that a few lines.
+To protect another app you have three options, from least to most coupled:
+
+1. **Reverse-proxy auth** (server-rendered apps): use your proxy's auth-request feature (nginx `auth_request`, Traefik ForwardAuth) against `GET /auth/verify`; the app trusts the `X-Auth-User` header. No code in the app.
+2. **`GET /whoami`** (browser/SPA/WASM clients): serve the client on the same origin and `fetch('/whoami', {credentials: 'same-origin'})` to learn who is logged in. The session cookie rides along automatically; the shim sets no CORS headers, so same-origin is required.
+3. **Direct DB**: query the `sessions`/`users` tables yourself, keyed off the `shim_session` cookie.
+
+A worked end-to-end example combining (1) and (2) — an egui/WASM game with an OAuth-gated leaderboard service behind this shim — lives in the sibling `egui-game` project.

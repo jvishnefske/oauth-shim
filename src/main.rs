@@ -15,7 +15,7 @@ use axum::{
     http::{header::HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use oauth2::reqwest::async_http_client;
@@ -26,7 +26,7 @@ use oauth2::{
 use providers::{Provider, ProviderConfig};
 use rand::RngCore;
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -144,6 +144,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/healthz", get(|| async { "ok" }))
+        .route("/whoami", get(whoami))
         .route("/auth/verify", get(verify))
         .route("/auth/:provider/login", get(login))
         .route("/auth/:provider/callback", get(callback))
@@ -406,6 +407,46 @@ fn current_user(state: &AppState, jar: &CookieJar) -> Option<db::User> {
     let token = jar.get(SESSION_COOKIE)?.value().to_string();
     let conn = state.db.lock().expect("db lock poisoned");
     db::user_for_token(&conn, &token).ok().flatten()
+}
+
+/// Identity of the current session as JSON, for browser/SPA clients that can't
+/// see ForwardAuth headers (e.g. a WASM single-page app served on the same
+/// origin). Always 200; `authenticated` is false when there is no valid session
+/// so clients can branch without treating "logged out" as an error.
+///
+/// Same-origin only: the shim sets no CORS headers, so deploy SPA clients
+/// behind the same domain (the session cookie rides along automatically).
+#[derive(Serialize)]
+struct WhoAmI {
+    authenticated: bool,
+    email: Option<String>,
+    name: Option<String>,
+    provider: Option<String>,
+    is_admin: bool,
+}
+
+async fn whoami(State(state): State<Shared>, jar: CookieJar) -> Response {
+    let body = match current_user(&state, &jar) {
+        Some(u) => WhoAmI {
+            authenticated: true,
+            email: u.email,
+            name: u.name,
+            provider: Some(u.provider),
+            is_admin: u.is_admin,
+        },
+        None => WhoAmI {
+            authenticated: false,
+            email: None,
+            name: None,
+            provider: None,
+            is_admin: false,
+        },
+    };
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(body),
+    )
+        .into_response()
 }
 
 /// ForwardAuth endpoint for Traefik / nginx auth_request.
