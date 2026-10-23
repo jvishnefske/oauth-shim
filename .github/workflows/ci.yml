@@ -37,6 +37,39 @@ jobs:
       - name: test
         run: cargo test --locked
 
+  # Line coverage via cargo-llvm-cov; lcov report is uploaded as an artifact.
+  # No --fail-under-lines gate yet: the crate currently has no tests (0%).
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: coverage
+        run: cargo llvm-cov --locked --lcov --output-path lcov.info
+
+      - name: coverage summary
+        run: cargo llvm-cov report --summary-only
+
+      - name: Upload lcov report
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
+
   # Confirm the project still builds on its declared MSRV (Cargo.toml rust-version).
   msrv:
     name: build on MSRV (1.75)
