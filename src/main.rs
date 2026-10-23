@@ -243,6 +243,8 @@ async fn index(State(state): State<Shared>, Query(q): Query<RdQuery>, jar: Cooki
     .into_response()
 }
 
+// axum handlers return `Response` as the error type; boxing it buys nothing.
+#[allow(clippy::result_large_err)]
 async fn login(
     State(state): State<Shared>,
     Path(provider): Path<String>,
@@ -297,6 +299,8 @@ struct CallbackQuery {
     error_description: Option<String>,
 }
 
+// axum handlers return `Response` as the error type; boxing it buys nothing.
+#[allow(clippy::result_large_err)]
 async fn callback(
     State(state): State<Shared>,
     Path(provider): Path<String>,
